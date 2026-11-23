@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import 'csc_courses.dart';
+import 'parking.dart';
+
+export 'csc_courses.dart';
+
 void main() {
   runApp(const MyApp());
 }
@@ -130,53 +135,69 @@ class StartupScreen extends StatelessWidget {
               ),
             ),
 
-            // START BUTTON  ->  opens the Course Finder
+            // START -> Course Finder,  PARKING -> TigerSpot
             Positioned(
               left: 0,
               right: 0,
               bottom: 75,
-              child: Center(
-                child: GestureDetector(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const CourseFinderScreen(),
-                      ),
-                    );
-                  },
-                  child: Container(
-                    width: 180,
-                    height: 55,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.18),
-                          blurRadius: 8,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Center(
-                      child: Text(
-                        'START',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.5,
-                          color: isDarkMode
-                              ? const Color(0xFF211832)
-                              : const Color(0xFF292000),
-                        ),
-                      ),
-                    ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _menuButton(
+                    context,
+                    'START',
+                    (_) => const CourseFinderScreen(),
                   ),
-                ),
+                  const SizedBox(width: 14),
+                  _menuButton(
+                    context,
+                    'PARKING',
+                    (_) => const ParkingScreen(),
+                  ),
+                ],
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _menuButton(
+    BuildContext context,
+    String label,
+    WidgetBuilder page,
+  ) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(context, MaterialPageRoute(builder: page));
+      },
+      child: Container(
+        width: 150,
+        height: 55,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Center(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.5,
+              color: isDarkMode
+                  ? const Color(0xFF211832)
+                  : const Color(0xFF292000),
+            ),
+          ),
         ),
       ),
     );
@@ -323,7 +344,9 @@ class CourseResult {
   final String code;
   final String? number;
   final Dept dept;
-  const CourseResult(this.code, this.number, this.dept);
+  // Set when the course is in the program of study (title, year, credits).
+  final Course? course;
+  const CourseResult(this.code, this.number, this.dept, [this.course]);
 }
 
 String levelOf(String number) {
@@ -342,17 +365,29 @@ List<CourseResult> searchCourses(String input) {
   final m = RegExp(r'^([A-Z]{2,4})\s*-?\s*(\d{2,3}[A-Z]?)?').firstMatch(t);
   if (m != null && departments.containsKey(m.group(1))) {
     final code = m.group(1)!;
-    return [CourseResult(code, m.group(2), departments[code]!)];
+    final number = m.group(2);
+    return [
+      CourseResult(code, number, departments[code]!, findCourse(code, number)),
+    ];
   }
 
+  // Search course titles, e.g. "Java" -> CSC 237 Java Programming.
+  // Needs 3+ letters so one letter doesn't match every course.
+  final byTitle = t.length < 3
+      ? <CourseResult>[]
+      : cscCourses
+          .where((c) => c.number != null && c.title.toUpperCase().contains(t))
+          .map((c) => CourseResult(c.code, c.number, departments[c.code]!, c));
+
   // Fall back to searching by subject name, e.g. "Accounting"
-  return departments.entries
+  final byDept = departments.entries
       .where((e) {
         final n = e.value.name.toUpperCase();
         return n.contains(t) || t.contains(n);
       })
-      .map((e) => CourseResult(e.key, null, e.value))
-      .toList();
+      .map((e) => CourseResult(e.key, null, e.value));
+
+  return [...byTitle, ...byDept];
 }
 
 // =====================================================
@@ -432,7 +467,7 @@ class _CourseFinderScreenState extends State<CourseFinderScreen> {
                 textCapitalization: TextCapitalization.characters,
                 style: TextStyle(color: textColor, fontSize: 18),
                 decoration: InputDecoration(
-                  hintText: 'Paste a course (e.g. CSC 101)',
+                  hintText: 'Paste a course (e.g. CSC 237)',
                   hintStyle: TextStyle(
                     color: textColor.withValues(alpha: 0.5),
                   ),
@@ -459,7 +494,7 @@ class _CourseFinderScreenState extends State<CourseFinderScreen> {
               _card(
                 cardColor,
                 Text(
-                  'No match. Try a code like CSC 101 or a subject name.\n\n'
+                  'No match. Try a code like CSC 237 or a subject name.\n\n'
                   'Known prefixes: ${departments.keys.join(", ")}',
                   style: TextStyle(color: textColor),
                 ),
@@ -472,7 +507,11 @@ class _CourseFinderScreenState extends State<CourseFinderScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${r.code} ${r.number ?? ""} - ${r.dept.name}',
+                      r.course != null
+                          ? '${r.course!.fullCode} - ${r.course!.title}'
+                          : [r.code, r.number, '-', r.dept.name]
+                              .whereType<String>()
+                              .join(' '),
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w900,
@@ -480,8 +519,22 @@ class _CourseFinderScreenState extends State<CourseFinderScreen> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(r.dept.area, style: TextStyle(color: textColor)),
-                    if (r.number != null)
+                    Text(
+                      r.course != null
+                          ? '${r.dept.name} · ${r.dept.area}'
+                          : r.dept.area,
+                      style: TextStyle(color: textColor),
+                    ),
+                    if (r.course != null)
+                      Text(
+                        '${r.course!.yearName} · ${r.course!.semesterName} · '
+                        '${r.course!.credits} credits',
+                        style: TextStyle(
+                          color: textColor.withValues(alpha: 0.6),
+                          fontSize: 12,
+                        ),
+                      )
+                    else if (r.number != null)
                       Text(
                         levelOf(r.number!),
                         style: TextStyle(
@@ -489,6 +542,12 @@ class _CourseFinderScreenState extends State<CourseFinderScreen> {
                           fontSize: 12,
                         ),
                       ),
+
+                    // Searching "CSC" on its own shows the full program.
+                    if (r.code == 'CSC' && r.number == null) ...[
+                      const SizedBox(height: 14),
+                      _programOfStudy(textColor, accent),
+                    ],
                     const SizedBox(height: 12),
                     Text(
                       'Find it here:',
@@ -548,6 +607,95 @@ class _CourseFinderScreenState extends State<CourseFinderScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  // The CSC courses laid out like the program sheet: year -> semester -> list.
+  // Tapping a course searches for it.
+  Widget _programOfStudy(Color textColor, Color accent) {
+    final children = <Widget>[
+      Text(
+        'Program of Study in Computer Science',
+        style: TextStyle(
+          fontWeight: FontWeight.w900,
+          color: textColor,
+          fontSize: 15,
+        ),
+      ),
+    ];
+
+    for (var year = 1; year <= 4; year++) {
+      children.add(Padding(
+        padding: const EdgeInsets.only(top: 14, bottom: 2),
+        child: Text(
+          yearNames[year - 1].toUpperCase(),
+          style: TextStyle(
+            fontWeight: FontWeight.w900,
+            color: accent,
+            letterSpacing: 1,
+          ),
+        ),
+      ));
+
+      for (var semester = 1; semester <= 2; semester++) {
+        final courses = cscCourses
+            .where((c) => c.year == year && c.semester == semester)
+            .toList();
+        children.add(Padding(
+          padding: const EdgeInsets.only(top: 6, bottom: 2),
+          child: Text(
+            semester == 1 ? 'First Semester' : 'Second Semester',
+            style: TextStyle(
+              fontStyle: FontStyle.italic,
+              fontWeight: FontWeight.bold,
+              color: textColor.withValues(alpha: 0.8),
+            ),
+          ),
+        ));
+
+        for (final c in courses) {
+          final row = Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 72,
+                  child: Text(
+                    c.fullCode,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: textColor,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Text(c.title, style: TextStyle(color: textColor)),
+                ),
+                Text(
+                  '${c.credits}',
+                  style: TextStyle(color: textColor.withValues(alpha: 0.7)),
+                ),
+              ],
+            ),
+          );
+
+          children.add(c.number == null
+              ? row
+              : InkWell(
+                  onTap: () {
+                    controller.text = c.fullCode;
+                    onChanged(c.fullCode);
+                  },
+                  child: row,
+                ));
+        }
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: children,
     );
   }
 
